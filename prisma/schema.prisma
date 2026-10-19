@@ -1,0 +1,518 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  SUPPORT
+  ANALYST
+}
+
+enum ShipmentStatus {
+  ORDER_CREATED
+  PICKED_UP
+  IN_TRANSIT
+  AT_DESTINATION_HUB
+  OUT_FOR_DELIVERY
+  DELIVERED
+  DELIVERY_ATTEMPTED
+  EXCEPTION
+  RTO
+  RETURNED
+  UNKNOWN
+}
+
+model Carrier {
+  id          String              @id @default(cuid())
+  code        String              @unique
+  name        String
+  mode        String              @default("live")
+  credentials CarrierCredential[]
+  shipments   Shipment[]
+}
+
+model CarrierCredential {
+  id             String   @id @default(cuid())
+  carrierId      String
+  carrier        Carrier  @relation(fields: [carrierId], references: [id])
+  encryptedToken String
+  baseUrl        String?
+  updatedAt      DateTime @updatedAt
+}
+
+model Shipment {
+  id                  String          @id @default(cuid())
+  trackingId          String
+  carrierId           String
+  carrier             Carrier         @relation(fields: [carrierId], references: [id])
+  carrierCode         String
+  carrierName         String
+  detectionConfidence Float           @default(1)
+  currentStatus       ShipmentStatus
+  currentStatusRaw    String
+  lastUpdatedAt       DateTime
+  estimatedDeliveryAt DateTime?
+  deliveredAt         DateTime?
+  origin              String?
+  destination         String?
+  lastCarrierSyncAt   DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  events              ShipmentEvent[]
+
+  @@unique([carrierCode, trackingId])
+}
+
+model ShipmentEvent {
+  id          String         @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  eventTime   DateTime
+  status      ShipmentStatus
+  rawStatus   String
+  description String?
+  location    String?
+  source      String
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  @@unique([shipmentId, eventTime, rawStatus])
+}
+
+model TrackingLookup {
+  id             String   @id @default(cuid())
+  trackingIdHash String
+  carrierCode    String?
+  success        Boolean
+  errorCode      String?
+  source         String
+  latencyMs      Int
+  requestId      String
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AdminUser {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  role           Role      @default(SUPPORT)
+  totpSecretEnc  String?
+  recoveryHashes String[]  @default([])
+  failedLogins   Int       @default(0)
+  lockedUntil    DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+model AdminSession {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  keyHash    String    @unique
+  prefix     String
+  userId     String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+}
+
+model WebhookEvent {
+  id            String    @id @default(cuid())
+  carrier       String
+  eventId       String
+  payload       Json
+  signature     String?
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime?
+  error         String?
+
+  @@unique([carrier, eventId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      String
+  action     String
+  resource   String?
+  resourceId String?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id            String   @id @default(cuid())
+  channel       String
+  event         String
+  shipmentId    String?
+  recipientHash String?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+}
+
+// ── Seller workspace (merchants, their orders) ──
+model Merchant {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String
+  passwordHash String
+  brandName    String?
+  brandColor   String            @default("#4f46e5")
+  supportContact String?
+  emailVerifiedAt DateTime?
+  plan         String            @default("FREE") // FREE | GROWTH | SCALE
+  planUntil    DateTime?
+  weightDivisor Float @default(5000)   // your courier contract values, saved with your weight disputes
+  weightSlab    Float @default(0.5)
+  weightTolerance Float @default(0.1)
+  suspendedAt  DateTime? // set by an admin; the seller cannot sign in or use the workspace
+  createdAt    DateTime          @default(now())
+  sessions     MerchantSession[]
+  tokens       MerchantToken[]
+  logo         MerchantLogo?
+  payments     Payment[]
+  connections  Connection[]
+  codLines     CodLine[]
+  weightCases  WeightCase[]
+  audits       SellerAudit[]
+  orders       Order[]
+  members      TeamMember[]
+  invites      TeamInvite[]
+  pickups      PickupLocation[]
+  mfaSecret    String?   // encrypted TOTP secret (set while enrolling)
+  mfaEnabledAt DateTime?
+  mfaRecovery  String[]  @default([]) // hashes of one-time recovery codes
+  rateCards    RateCard[]
+  notifications ShipmentNotification[]
+  apiKeys      SellerApiKey[]
+}
+
+model MerchantSession {
+  id         String   @id @default(cuid())
+  merchantId String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId])
+  memberId   String?  // null = the workspace owner signed in
+  member     TeamMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id           String   @id @default(cuid())
+  merchantId   String
+  orderNo      String
+  customerName String?
+  phone        String?
+  pincode      String?
+  paymentType  String   @default("PREPAID") // COD | PREPAID
+  amount       Decimal  @default(0) @db.Decimal(12, 2)
+  awb          String?
+  carrierCode  String?
+  status       String   @default("NEW") // NEW | IN_TRANSIT | NDR | DELIVERED | RTO
+  riskLevel    String   @default("LOW")
+  riskReasons  String[] @default([])
+  carrierName  String?  // courier that actually answered (from the last refresh)
+  shippedAt    DateTime? // first carrier scan
+  deliveredAt  DateTime? // delivery scan, used for transit time
+  codStatus    String   @default("NOT_SENT") // NOT_SENT | SENT | CONFIRMED | CANCELLED (WhatsApp COD check)
+  trackToken   String?  @unique // random, unguessable id used in the customer link /t/<token>
+  createdAt    DateTime @default(now())
+  merchant     Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  ndrCases     NdrCase[]
+  @@unique([merchantId, orderNo])
+  @@index([merchantId, status])
+  notifyOptIn  Boolean  @default(false) // customer agreed to WhatsApp status messages
+  lastRefreshedAt DateTime?
+  lastEvent    String?  // last status message event, so the same one is never sent twice
+  notifications ShipmentNotification[]
+}
+
+// Failed-delivery (NDR) case: opened when a shipment turns NDR, answered by the customer on /t/<token>, closed by the seller.
+model NdrCase {
+  id             String    @id @default(cuid())
+  merchantId     String
+  orderId        String
+  status         String    @default("OPEN") // OPEN | CUSTOMER_REPLIED | RESOLVED
+  reason         String?
+  customerChoice String?   // REATTEMPT | UPDATE_ADDRESS | CANCEL
+  customerNote   String?
+  createdAt      DateTime  @default(now())
+  repliedAt      DateTime?
+  resolvedAt     DateTime?
+  courierAction  String?   // e.g. "RE-ATTEMPT · UPL123" after we asked the courier
+  courierActionAt DateTime?
+  order          Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  @@index([merchantId, status])
+  @@index([orderId])
+}
+
+// One-time links emailed to sellers (kind: VERIFY | RESET). Only a hash of the token is stored.
+model MerchantToken {
+  id         String    @id @default(cuid())
+  merchantId String
+  kind       String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId, kind])
+  memberId   String?  // set when the link belongs to a team member (password reset)
+  member     TeamMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+}
+
+// Brand logo stored in the database (resized PNG, max ~200 KB) and served from our own domain, so no extra storage service is needed.
+model MerchantLogo {
+  merchantId String   @id
+  data       Bytes
+  updatedAt  DateTime @updatedAt
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+}
+
+// One row per paid Razorpay payment link (linkId is unique, so a repeated webhook can never extend a plan twice).
+model Payment {
+  id          String   @id @default(cuid())
+  merchantId  String
+  linkId      String   @unique
+  plan        String
+  amountPaise Int
+  paidAt      DateTime @default(now())
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId])
+}
+
+// A seller's OWN credentials for a courier (DELHIVERY token) or store (WOOCOMMERCE key+secret). Always encrypted, never sent back to the browser.
+model Connection {
+  id         String    @id @default(cuid())
+  merchantId String
+  kind       String    // DELHIVERY | WOOCOMMERCE
+  shopUrl    String?
+  encKey     String
+  encSecret  String?
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@unique([merchantId, kind])
+}
+
+// COD settlement problems the seller chose to follow up (short/over-paid or unknown lines). Pending items are always computed live from orders.
+model CodLine {
+  id         String   @id @default(cuid())
+  merchantId String
+  awb        String
+  orderNo    String?
+  expected   Decimal  @db.Decimal(14, 2)
+  received   Decimal  @db.Decimal(14, 2)
+  diff       Decimal  @db.Decimal(14, 2)
+  ref        String   @default("")
+  kind       String   // SHORT | EXCESS | UNKNOWN
+  status     String   @default("OPEN") // OPEN | DISPUTED | ADJUSTED | RESOLVED
+  note       String?
+  createdAt  DateTime @default(now())
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@unique([merchantId, awb, ref]) // saving the same settlement line twice is ignored
+  @@index([merchantId, status])
+}
+
+model WeightCase {
+  id           String   @id @default(cuid())
+  merchantId   String
+  awb          String
+  declaredKg   Float
+  volumetricKg Float
+  expectedKg   Float
+  billedKg     Float
+  excessKg     Float
+  reason       String
+  status       String   @default("OPEN") // OPEN | DISPUTED | WON | LOST | CLOSED
+  note         String?
+  createdAt    DateTime @default(now())
+  merchant     Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@unique([merchantId, awb, billedKg])
+  @@index([merchantId, status])
+}
+
+// What each seller did, for support and disputes. Never stores secrets or customer details.
+model SellerAudit {
+  id         String   @id @default(cuid())
+  merchantId String
+  action     String
+  entity     String?
+  entityId   String?
+  detail     String?
+  createdAt  DateTime @default(now())
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId, createdAt])
+}
+
+// A teammate with their own login inside a seller workspace (the Merchant row is the workspace; its owner signs in as before).
+model TeamMember {
+  id           String            @id @default(cuid())
+  merchantId   String
+  email        String            @unique
+  name         String
+  passwordHash String
+  role         String            // ADMIN | OPERATIONS | FINANCE | VIEWER
+  status       String            @default("ACTIVE") // ACTIVE | DISABLED
+  createdAt    DateTime          @default(now())
+  merchant     Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  sessions     MerchantSession[]
+  tokens       MerchantToken[]
+  @@index([merchantId])
+  mfaSecret    String?   // encrypted TOTP secret (set while enrolling)
+  mfaEnabledAt DateTime?
+  mfaRecovery  String[]  @default([]) // hashes of one-time recovery codes
+}
+
+model TeamInvite {
+  id         String    @id @default(cuid())
+  merchantId String
+  email      String
+  role       String
+  tokenHash  String    @unique
+  invitedBy  String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId])
+}
+
+model PickupLocation {
+  id          String   @id @default(cuid())
+  merchantId  String
+  name        String
+  contactName String?
+  phone       String?
+  addressLine String
+  city        String
+  state       String
+  pincode     String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId])
+}
+
+// Admin-editable plan limits and prices. Missing rows fall back to the defaults in lib/seller/plans.ts.
+model PlanConfig {
+  plan      String   @id // FREE | GROWTH | SCALE
+  price     Int      // rupees per 30 days
+  orders    Int
+  seats     Int
+  updatedAt DateTime @updatedAt
+}
+
+// Background work (tracking refreshes, message sending). A cron endpoint claims due jobs, retries with backoff, and marks them DONE or FAILED.
+model Job {
+  id          String    @id @default(cuid())
+  type        String    // tracking.refresh | notify.whatsapp
+  merchantId  String?
+  payload     Json      @default("{}")
+  status      String    @default("PENDING") // PENDING | RUNNING | DONE | FAILED | CANCELLED
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  runAt       DateTime  @default(now())
+  lockedAt    DateTime?
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  @@index([status, runAt])
+  @@index([merchantId])
+}
+
+// Event log of shipment status messages. IN_APP rows are always written; WHATSAPP rows only for opted-in customers with a configured provider.
+model ShipmentNotification {
+  id         String   @id @default(cuid())
+  merchantId String
+  orderId    String
+  event      String   // dispatched | out_for_delivery | attempt_failed | delivered
+  channel    String   // IN_APP | WHATSAPP
+  status     String   // LOGGED | QUEUED | SENT | FAILED
+  detail     String?
+  createdAt  DateTime @default(now())
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  providerId String?  // WhatsApp message id, used to match delivery receipts
+  @@index([merchantId, createdAt])
+  @@index([providerId])
+}
+
+// The seller's OWN contract rates, used to compare couriers. Nothing here is guessed or fetched from a courier.
+model RateCard {
+  id              String   @id @default(cuid())
+  merchantId      String
+  courier         String
+  baseRate        Decimal  @db.Decimal(10, 2)
+  baseKg          Float    @default(0.5)
+  extraRate       Decimal  @default(0) @db.Decimal(10, 2)
+  extraKg         Float    @default(0.5)
+  codFee          Decimal  @default(0) @db.Decimal(10, 2)
+  codPercent      Float    @default(0)
+  etaDays         Int
+  maxKg           Float?
+  codAllowed      Boolean  @default(true)
+  pincodePrefixes String[] @default([])
+  updatedAt       DateTime @updatedAt
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@unique([merchantId, courier])
+}
+
+// API keys for /api/v1. Only a hash is stored; the key itself is shown once when created.
+model SellerApiKey {
+  id         String    @id @default(cuid())
+  merchantId String
+  name       String
+  prefix     String    // first characters, so the owner can recognise a key
+  keyHash    String    @unique
+  createdBy  String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@index([merchantId])
+}

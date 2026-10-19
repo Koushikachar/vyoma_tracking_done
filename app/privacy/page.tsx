@@ -1,0 +1,3 @@
+export const metadata = { title: "Privacy Policy | VYOMA ROUTE" };
+export default function Page() { return (<article className="mx-auto max-w-3xl px-6 py-16 space-y-4"><h1 className="text-3xl font-bold">Privacy Policy</h1>
+<p className="text-muted">DRAFT — have counsel review. We process tracking IDs you submit, IP addresses (rate limiting and abuse prevention, tracking IDs hashed in logs), essential and authentication cookies, error data sent to Sentry (no secrets or full carrier payloads), and data returned by third-party carrier APIs. Lookup logs are retained for a limited period and can be deleted by admins. You may request access or deletion by contacting us. Contact: set your address here.</p></article>); }

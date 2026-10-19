@@ -1,0 +1,3 @@
+export const metadata = { title: "About VYOMA ROUTE | VYOMA ROUTE" };
+export default function Page() { return (<article className="mx-auto max-w-3xl my-16 px-8 py-12 space-y-4 glass rounded-3xl"><h1 className="text-3xl font-bold">About VYOMA ROUTE</h1>
+<p className="text-muted">VYOMA ROUTE is a universal shipment tracking platform: one tracking ID, one clear timeline, regardless of carrier. Carriers are connected through official or authorized APIs only, and every carrier event is normalized into one standard status model while the original carrier wording is preserved.</p><p className="text-muted">Today only the VYOMA Test Carrier is active; live carrier integrations are added as credentials are configured.</p></article>); }

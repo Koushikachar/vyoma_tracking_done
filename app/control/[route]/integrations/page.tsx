@@ -1,0 +1,13 @@
+import { pageGuard } from "@/lib/auth/guard"; import KeyForm from "@/components/admin/KeyForm"; import { CATALOG } from "@/lib/carriers/catalog";
+import { loadCredentials } from "@/lib/carriers/credentials"; import { listAdapters } from "@/lib/carriers/registry"; import { Badge, PageHeader, panel } from "@/components/admin/ui";
+export const dynamic = "force-dynamic";
+export default async function P({ params }: { params: Promise<{ route: string }> }) { await pageGuard((await params).route, "carriers"); await loadCredentials();
+  const on = new Set(listAdapters().filter(a => a.isConfigured()).map(a => a.code)); const direct = CATALOG.filter(c => c.kind === "direct"); const via = CATALOG.filter(c => c.kind === "ship24");
+  return (<div className="p-5 md:p-8 space-y-8 mx-auto w-full max-w-6xl"><PageHeader title="Integrations" sub="Keys are encrypted at rest and never shown again. Add a key and the carrier starts working immediately. Portal links and steps can change: check the carrier’s own page." />
+    <section className={`${panel} p-6 flex items-center justify-between`}><div><b>VYOMA Test Carrier</b><p className="text-sm text-muted">Built-in simulator for the 14 test scenarios. No key needed.</p></div><Badge tone="ok">Always on</Badge></section>
+    <section><h2 className="font-semibold mb-3">Direct integrations</h2><div className="grid items-start md:grid-cols-2 gap-4">{direct.map(c => <div key={c.code} className={`${panel} p-6`}>
+      <div className="flex items-center gap-3"><span className="grid place-items-center w-10 h-10 rounded-2xl admin-hero font-bold">{c.name[0]}</span><b className="flex-1">{c.name}</b>{on.has(c.code) ? <Badge tone="ok">Configured</Badge> : <Badge>No key</Badge>}</div>
+      <details className="mt-4 text-sm"><summary className="cursor-pointer font-medium">How to get a key</summary><p className="mt-2 text-muted">{c.steps}</p><a href={c.docs} target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-brand">Open developer page ↗</a></details>
+      <KeyForm carrierCode={c.code} hasKey={on.has(c.code)} /></div>)}</div></section>
+    <section><h2 className="font-semibold mb-3">Looked up through Ship24</h2><div className="grid items-start sm:grid-cols-2 xl:grid-cols-3 gap-4">{via.map(c => <div key={c.code} className={`${panel} p-5`}><div className="flex justify-between"><b>{c.name}</b>{on.has("ship24") ? <Badge tone="ok">Via Ship24</Badge> : <Badge>Needs Ship24 key</Badge>}</div>
+      <details className="mt-3 text-sm"><summary className="cursor-pointer">How to get access</summary><p className="mt-2 text-muted">{c.steps}</p></details></div>)}</div></section></div>); }
